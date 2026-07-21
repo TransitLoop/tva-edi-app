@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions release pipeline building macOS (Apple Silicon + Intel), Windows, and Linux installers and uploading them to GitHub Releases
+
 ## [0.1.0] — 2026-07-22
 
 ### Added

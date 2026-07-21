@@ -7,11 +7,26 @@ Application Tauri pour saisir, importer et exporter le **relevé des déductions
 | Platform | Download |
 | --- | --- |
 | Latest release | [Releases](https://github.com/TransitLoop/tva-edi-app/releases/latest) |
-| macOS | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.dmg` / `.app`) |
+| macOS | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.dmg` — Apple Silicon + Intel) |
 | Windows | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.exe` / `.msi`) |
 | Linux | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.AppImage` / `.deb`) |
 
 Full history and notes: [CHANGELOG.md](./CHANGELOG.md) · [All releases](https://github.com/TransitLoop/tva-edi-app/releases)
+
+### CI releases
+
+GitHub Actions builds **macOS, Windows, and Linux** and uploads installers to the GitHub Release when you push a version tag:
+
+```bash
+# 1. Bump version in package.json and src-tauri/tauri.conf.json
+# 2. Update CHANGELOG.md
+git add -A
+git commit -m "Release v0.2.0"
+git tag v0.2.0
+git push origin main --tags
+```
+
+Or run the **Release** workflow manually: Actions → Release → Run workflow.
 
 ## Fonctionnalités
 
