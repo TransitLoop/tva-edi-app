@@ -2,6 +2,17 @@
 
 Application Tauri pour saisir, importer et exporter le **relevé des déductions TVA** (Simpl-TVA / DGI), puis générer le fichier XML `DeclarationReleveDeduction`.
 
+## Download
+
+| Platform | Download |
+| --- | --- |
+| Latest release | [Releases](https://github.com/TransitLoop/tva-edi-app/releases/latest) |
+| macOS | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.dmg` / `.app`) |
+| Windows | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.exe` / `.msi`) |
+| Linux | [Assets on latest release](https://github.com/TransitLoop/tva-edi-app/releases/latest) (`.AppImage` / `.deb`) |
+
+Full history and notes: [CHANGELOG.md](./CHANGELOG.md) · [All releases](https://github.com/TransitLoop/tva-edi-app/releases)
+
 ## Fonctionnalités
 
 - Saisie tableau : N° ordre, N° facture, Date facture, Fournisseur, IF, ICE, Désignation, HT, Taux TVA, TVA, TTC
@@ -110,4 +121,3 @@ Règles appliquées (alignées EDI DGI) :
 - dates au format `AAAA-MM-JJ`
 - décimal avec `.`
 - balises vides omises côté saisie (valeurs requises validées avant export XML)
-# tva-edi-app
