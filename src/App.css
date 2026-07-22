@@ -42,7 +42,7 @@ select {
 .app {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto auto auto 1fr auto;
 }
 
 .topbar {
@@ -157,9 +157,37 @@ select {
   color: var(--danger);
 }
 
+.mode-tabs {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.75rem 1.25rem 0;
+}
+
+.mode-tabs button {
+  border: 1px solid var(--line);
+  background: rgba(255, 253, 248, 0.8);
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.mode-tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+
+.mode-caption {
+  margin: 0.55rem 1.25rem 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .header-panel {
   display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.75rem 1rem;
   padding: 1rem 1.25rem;
   background: rgba(255, 253, 248, 0.7);
@@ -288,6 +316,10 @@ tfoot td {
 .total {
   text-align: right;
   font-family: var(--mono);
+}
+
+.total.highlight {
+  background: #fff3bf;
 }
 
 .statusbar {

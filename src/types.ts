@@ -1,3 +1,5 @@
+export type AppMode = "releve" | "non_residents";
+
 export type DeclarationHeader = {
   idf: string;
   annee: string;
@@ -23,6 +25,20 @@ export type DeductionRow = {
   modePaiementId: string;
 };
 
+/** Liste des contribuables non résidents EDI (annexe TVA). */
+export type NonResidentRow = {
+  id: string;
+  ordre: number;
+  nom: string;
+  adresse: string;
+  identifiantFiscal: string;
+  natureOperation: string;
+  datePaiement: string;
+  baseImposable: number | "";
+  taux: number | "";
+  tvaExigible: number | "";
+};
+
 export const TABLE_HEADERS = [
   "N° ordre",
   "N° facture",
@@ -42,6 +58,17 @@ export const TEMPLATE_HEADERS = [
   ...TABLE_HEADERS,
   "Date paiement",
   "Mode paiement",
+] as const;
+
+export const NON_RESIDENT_HEADERS = [
+  "Nom et Prénom ou raison sociale",
+  "Adresse à l'étranger",
+  "N° d'identification fiscale",
+  "Nature de l'opération",
+  "Date de paiement",
+  "Base imposable (HT)",
+  "Taux (%)",
+  "TVA exigible",
 ] as const;
 
 export const DEFAULT_HEADER: DeclarationHeader = {
@@ -71,5 +98,20 @@ export function createEmptyRow(
     tva: "",
     ttc: "",
     modePaiementId,
+  };
+}
+
+export function createEmptyNonResidentRow(ordre: number): NonResidentRow {
+  return {
+    id: crypto.randomUUID(),
+    ordre,
+    nom: "",
+    adresse: "",
+    identifiantFiscal: "",
+    natureOperation: "Services",
+    datePaiement: "",
+    baseImposable: "",
+    taux: 20,
+    tvaExigible: "",
   };
 }

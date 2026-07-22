@@ -8,12 +8,26 @@ import {
   parseCsv,
   parseExcel,
 } from "./lib/io";
+import {
+  buildNonResidentCsv,
+  buildNonResidentExcelBlob,
+  buildNonResidentTemplateRows,
+  generateNonResidentXml,
+  isNonResidentXml,
+  parseNonResidentCsv,
+  parseNonResidentExcel,
+  parseNonResidentXml,
+  validateNonResidentXml,
+} from "./lib/nonResidents";
 import { generateXml, parseXml, validateForXml } from "./lib/xml";
 import {
   DEFAULT_HEADER,
+  createEmptyNonResidentRow,
   createEmptyRow,
+  type AppMode,
   type DeclarationHeader,
   type DeductionRow,
+  type NonResidentRow,
 } from "./types";
 import "./App.css";
 
@@ -21,13 +35,20 @@ type MenuKey = "fichier" | "modele" | "export" | null;
 type Status = { type: "ok" | "err" | "info"; text: string } | null;
 
 export default function App() {
+  const [mode, setMode] = useState<AppMode>("releve");
   const [header, setHeader] = useState<DeclarationHeader>(DEFAULT_HEADER);
   const [rows, setRows] = useState<DeductionRow[]>([createEmptyRow(1)]);
+  const [nrRows, setNrRows] = useState<NonResidentRow[]>([
+    createEmptyNonResidentRow(1),
+  ]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openMenu, setOpenMenu] = useState<MenuKey>(null);
   const [status, setStatus] = useState<Status>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const activeIds =
+    mode === "releve" ? rows.map((r) => r.id) : nrRows.map((r) => r.id);
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -40,12 +61,33 @@ export default function App() {
     );
   }, [rows]);
 
+  const nrTotals = useMemo(() => {
+    return nrRows.reduce(
+      (acc, r) => ({
+        base: acc.base + toNumber(r.baseImposable),
+        tva: acc.tva + toNumber(r.tvaExigible),
+      }),
+      { base: 0, tva: 0 },
+    );
+  }, [nrRows]);
+
   function flash(type: "ok" | "err" | "info", text: string) {
     setStatus({ type, text });
     window.setTimeout(() => setStatus(null), 4500);
   }
 
+  function switchMode(next: AppMode) {
+    if (next === mode) return;
+    setMode(next);
+    setSelected(new Set());
+    setOpenMenu(null);
+  }
+
   function renumber(list: DeductionRow[]): DeductionRow[] {
+    return list.map((r, i) => ({ ...r, ordre: i + 1 }));
+  }
+
+  function renumberNr(list: NonResidentRow[]): NonResidentRow[] {
     return list.map((r, i) => ({ ...r, ordre: i + 1 }));
   }
 
@@ -81,11 +123,48 @@ export default function App() {
     );
   }
 
+  function updateNrCell(id: string, field: keyof NonResidentRow, raw: string) {
+    setNrRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+
+        if (
+          field === "baseImposable" ||
+          field === "taux" ||
+          field === "tvaExigible"
+        ) {
+          const next: NonResidentRow = { ...row };
+          next[field] = raw.trim() === "" ? "" : round2(toNumber(raw));
+          if (
+            (field === "baseImposable" || field === "taux") &&
+            next.baseImposable !== "" &&
+            next.taux !== ""
+          ) {
+            next.tvaExigible = round2(
+              (toNumber(next.baseImposable) * toNumber(next.taux)) / 100,
+            );
+          }
+          return next;
+        }
+
+        if (field === "ordre") {
+          return { ...row, ordre: Number(raw) || row.ordre };
+        }
+
+        return { ...row, [field]: raw };
+      }),
+    );
+  }
+
   function addRow() {
-    setRows((prev) => [
-      ...prev,
-      createEmptyRow(prev.length + 1, header.modePaiementId),
-    ]);
+    if (mode === "releve") {
+      setRows((prev) => [
+        ...prev,
+        createEmptyRow(prev.length + 1, header.modePaiementId),
+      ]);
+    } else {
+      setNrRows((prev) => [...prev, createEmptyNonResidentRow(prev.length + 1)]);
+    }
   }
 
   function deleteSelected() {
@@ -93,10 +172,17 @@ export default function App() {
       flash("info", "Sélectionnez une ou plusieurs lignes à supprimer.");
       return;
     }
-    setRows((prev) => {
-      const next = renumber(prev.filter((r) => !selected.has(r.id)));
-      return next.length ? next : [createEmptyRow(1, header.modePaiementId)];
-    });
+    if (mode === "releve") {
+      setRows((prev) => {
+        const next = renumber(prev.filter((r) => !selected.has(r.id)));
+        return next.length ? next : [createEmptyRow(1, header.modePaiementId)];
+      });
+    } else {
+      setNrRows((prev) => {
+        const next = renumberNr(prev.filter((r) => !selected.has(r.id)));
+        return next.length ? next : [createEmptyNonResidentRow(1)];
+      });
+    }
     setSelected(new Set());
   }
 
@@ -111,7 +197,7 @@ export default function App() {
 
   function toggleSelectAll() {
     setSelected((prev) =>
-      prev.size === rows.length ? new Set() : new Set(rows.map((r) => r.id)),
+      prev.size === activeIds.length ? new Set() : new Set(activeIds),
     );
   }
 
@@ -120,24 +206,47 @@ export default function App() {
       const name = file.name.toLowerCase();
       if (name.endsWith(".xml")) {
         const text = await file.text();
-        const parsed = parseXml(text);
-        setHeader((h) => ({ ...h, ...parsed.header }));
-        setRows(
-          parsed.rows.length
-            ? parsed.rows
-            : [createEmptyRow(1, header.modePaiementId)],
-        );
-        flash("ok", `XML importé: ${parsed.rows.length} ligne(s).`);
+        if (isNonResidentXml(text) || mode === "non_residents") {
+          const parsed = parseNonResidentXml(text);
+          setHeader((h) => ({ ...h, ...parsed.header }));
+          setNrRows(
+            parsed.rows.length ? parsed.rows : [createEmptyNonResidentRow(1)],
+          );
+          setMode("non_residents");
+          flash("ok", `XML non-résidents importé: ${parsed.rows.length} ligne(s).`);
+        } else {
+          const parsed = parseXml(text);
+          setHeader((h) => ({ ...h, ...parsed.header }));
+          setRows(
+            parsed.rows.length
+              ? parsed.rows
+              : [createEmptyRow(1, header.modePaiementId)],
+          );
+          setMode("releve");
+          flash("ok", `XML relevé importé: ${parsed.rows.length} ligne(s).`);
+        }
       } else if (name.endsWith(".csv")) {
         const text = await file.text();
-        const parsed = parseCsv(text);
-        setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
-        flash("ok", `CSV importé: ${parsed.length} ligne(s).`);
+        if (mode === "non_residents") {
+          const parsed = parseNonResidentCsv(text);
+          setNrRows(parsed.length ? renumberNr(parsed) : [createEmptyNonResidentRow(1)]);
+          flash("ok", `CSV importé: ${parsed.length} ligne(s).`);
+        } else {
+          const parsed = parseCsv(text);
+          setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
+          flash("ok", `CSV importé: ${parsed.length} ligne(s).`);
+        }
       } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
         const buf = await file.arrayBuffer();
-        const parsed = parseExcel(buf);
-        setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
-        flash("ok", `Excel importé: ${parsed.length} ligne(s).`);
+        if (mode === "non_residents") {
+          const parsed = parseNonResidentExcel(buf);
+          setNrRows(parsed.length ? renumberNr(parsed) : [createEmptyNonResidentRow(1)]);
+          flash("ok", `Excel importé: ${parsed.length} ligne(s).`);
+        } else {
+          const parsed = parseExcel(buf);
+          setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
+          flash("ok", `Excel importé: ${parsed.length} ligne(s).`);
+        }
       } else {
         flash("err", "Formats acceptés: .xml, .csv, .xlsx");
       }
@@ -150,66 +259,128 @@ export default function App() {
   }
 
   async function downloadTemplate(format: "csv" | "xlsx") {
-    const sample = buildTemplateRows();
-    if (format === "csv") {
-      await saveTextFile(
-        "modele_releve_deductions.csv",
-        buildCsv(sample, true),
-        [{ name: "CSV", extensions: ["csv"] }],
-      );
+    if (mode === "non_residents") {
+      const sample = buildNonResidentTemplateRows();
+      if (format === "csv") {
+        await saveTextFile(
+          "modele_non_residents.csv",
+          buildNonResidentCsv(sample),
+          [{ name: "CSV", extensions: ["csv"] }],
+        );
+      } else {
+        await saveBinaryFile(
+          "modele_non_residents.xlsx",
+          buildNonResidentExcelBlob(sample),
+          [{ name: "Excel", extensions: ["xlsx"] }],
+        );
+      }
     } else {
-      await saveBinaryFile(
-        "modele_releve_deductions.xlsx",
-        buildExcelBlob(sample, true),
-        [{ name: "Excel", extensions: ["xlsx"] }],
-      );
+      const sample = buildTemplateRows();
+      if (format === "csv") {
+        await saveTextFile(
+          "modele_releve_deductions.csv",
+          buildCsv(sample, true),
+          [{ name: "CSV", extensions: ["csv"] }],
+        );
+      } else {
+        await saveBinaryFile(
+          "modele_releve_deductions.xlsx",
+          buildExcelBlob(sample, true),
+          [{ name: "Excel", extensions: ["xlsx"] }],
+        );
+      }
     }
     flash("ok", `Modèle ${format.toUpperCase()} téléchargé.`);
     setOpenMenu(null);
   }
 
   async function exportCsv() {
-    await saveTextFile(
-      `releve_deductions_${header.annee}_P${header.periode}.csv`,
-      buildCsv(rows, false),
-      [{ name: "CSV", extensions: ["csv"] }],
-    );
+    if (mode === "non_residents") {
+      await saveTextFile(
+        `non_residents_${header.annee}_P${header.periode}.csv`,
+        buildNonResidentCsv(nrRows),
+        [{ name: "CSV", extensions: ["csv"] }],
+      );
+    } else {
+      await saveTextFile(
+        `releve_deductions_${header.annee}_P${header.periode}.csv`,
+        buildCsv(rows, false),
+        [{ name: "CSV", extensions: ["csv"] }],
+      );
+    }
     flash("ok", "Export CSV terminé.");
     setOpenMenu(null);
   }
 
   async function exportExcel() {
-    await saveBinaryFile(
-      `releve_deductions_${header.annee}_P${header.periode}.xlsx`,
-      buildExcelBlob(rows, false),
-      [{ name: "Excel", extensions: ["xlsx"] }],
-    );
+    if (mode === "non_residents") {
+      await saveBinaryFile(
+        `non_residents_${header.annee}_P${header.periode}.xlsx`,
+        buildNonResidentExcelBlob(nrRows),
+        [{ name: "Excel", extensions: ["xlsx"] }],
+      );
+    } else {
+      await saveBinaryFile(
+        `releve_deductions_${header.annee}_P${header.periode}.xlsx`,
+        buildExcelBlob(rows, false),
+        [{ name: "Excel", extensions: ["xlsx"] }],
+      );
+    }
     flash("ok", "Export Excel terminé.");
     setOpenMenu(null);
   }
 
   async function exportXml() {
-    const errors = validateForXml(header, rows);
-    if (errors.length) {
-      flash("err", errors[0]);
-      setOpenMenu(null);
-      return;
+    if (mode === "non_residents") {
+      const errors = validateNonResidentXml(header, nrRows);
+      if (errors.length) {
+        flash("err", errors[0]);
+        setOpenMenu(null);
+        return;
+      }
+      const xml = generateNonResidentXml(header, nrRows);
+      await saveTextFile(
+        `DeclarationNonResidents_${header.idf}_${header.annee}_P${header.periode}.xml`,
+        xml,
+        [{ name: "XML", extensions: ["xml"] }],
+      );
+    } else {
+      const errors = validateForXml(header, rows);
+      if (errors.length) {
+        flash("err", errors[0]);
+        setOpenMenu(null);
+        return;
+      }
+      const prepared = rows.map((r) => ({
+        ...r,
+        dpai: r.dpai || r.dfac,
+        modePaiementId: r.modePaiementId || header.modePaiementId,
+        designation: r.designation || r.num,
+      }));
+      const xml = generateXml(header, prepared);
+      await saveTextFile(
+        `DeclarationReleveDeduction_${header.idf}_${header.annee}_P${header.periode}.xml`,
+        xml,
+        [{ name: "XML", extensions: ["xml"] }],
+      );
     }
-    const prepared = rows.map((r) => ({
-      ...r,
-      dpai: r.dpai || r.dfac,
-      modePaiementId: r.modePaiementId || header.modePaiementId,
-      designation: r.designation || r.num,
-    }));
-    const xml = generateXml(header, prepared);
-    await saveTextFile(
-      `DeclarationReleveDeduction_${header.idf}_${header.annee}_P${header.periode}.xml`,
-      xml,
-      [{ name: "XML", extensions: ["xml"] }],
-    );
     flash("ok", "Fichier XML EDI généré.");
     setOpenMenu(null);
   }
+
+  function resetCurrent() {
+    setHeader(DEFAULT_HEADER);
+    if (mode === "releve") {
+      setRows([createEmptyRow(1)]);
+    } else {
+      setNrRows([createEmptyNonResidentRow(1)]);
+    }
+    setSelected(new Set());
+    setOpenMenu(null);
+    flash("info", "Nouvelle déclaration.");
+  }
+
+  const lineCount = mode === "releve" ? rows.length : nrRows.length;
 
   return (
     <div className="app" onClick={() => setOpenMenu(null)}>
@@ -218,7 +389,11 @@ export default function App() {
           <span className="brand-mark">DGI</span>
           <div>
             <strong>TVA EDI</strong>
-            <small>Relevé des déductions — Simpl-TVA</small>
+            <small>
+              {mode === "releve"
+                ? "Relevé des déductions — Simpl-TVA"
+                : "Contribuables non résidents — Simpl-TVA"}
+            </small>
           </div>
         </div>
 
@@ -238,16 +413,7 @@ export default function App() {
                 <button type="button" onClick={() => fileRef.current?.click()}>
                   Importer CSV / Excel / XML…
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHeader(DEFAULT_HEADER);
-                    setRows([createEmptyRow(1)]);
-                    setSelected(new Set());
-                    setOpenMenu(null);
-                    flash("info", "Nouvelle déclaration.");
-                  }}
-                >
+                <button type="button" onClick={resetCurrent}>
                   Nouvelle déclaration
                 </button>
               </div>
@@ -304,7 +470,7 @@ export default function App() {
 
         <div className="top-actions">
           <button type="button" className="ghost" onClick={addRow}>
-            + Ligne
+            + Ajouter
           </button>
           <button type="button" className="ghost danger" onClick={deleteSelected}>
             Supprimer
@@ -325,6 +491,30 @@ export default function App() {
           if (f) void onImportFile(f);
         }}
       />
+
+      <section className="mode-tabs" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className={mode === "releve" ? "active" : ""}
+          onClick={() => switchMode("releve")}
+        >
+          Relevé des déductions
+        </button>
+        <button
+          type="button"
+          className={mode === "non_residents" ? "active" : ""}
+          onClick={() => switchMode("non_residents")}
+        >
+          Liste des contribuables non résidents EDI
+        </button>
+      </section>
+
+      {mode === "non_residents" && (
+        <p className="mode-caption">
+          Opérations réalisées avec des contribuables non résidents à l’exclusion
+          des redevances et droits de licence visés à l’article 91-XI
+        </p>
+      )}
 
       <section className="header-panel">
         <label>
@@ -361,184 +551,319 @@ export default function App() {
             <option value="2">2 — Trimestriel</option>
           </select>
         </label>
-        <label>
-          Mode paiement (défaut)
-          <input
-            value={header.modePaiementId}
-            onChange={(e) => updateHeader("modePaiementId", e.target.value)}
-            placeholder="7"
-          />
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={showAdvanced}
-            onChange={(e) => setShowAdvanced(e.target.checked)}
-          />
-          Afficher date paiement / mode paiement
-        </label>
+        {mode === "releve" && (
+          <>
+            <label>
+              Mode paiement (défaut)
+              <input
+                value={header.modePaiementId}
+                onChange={(e) => updateHeader("modePaiementId", e.target.value)}
+                placeholder="7"
+              />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={showAdvanced}
+                onChange={(e) => setShowAdvanced(e.target.checked)}
+              />
+              Afficher date paiement / mode paiement
+            </label>
+          </>
+        )}
       </section>
 
       <section className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th className="check-col">
-                <input
-                  type="checkbox"
-                  checked={selected.size === rows.length && rows.length > 0}
-                  onChange={toggleSelectAll}
-                />
-              </th>
-              <th>N° ordre</th>
-              <th>N° facture</th>
-              <th>Date facture</th>
-              {showAdvanced && <th>Date paiement</th>}
-              <th>Fournisseur</th>
-              <th>IF fournisseur</th>
-              <th>ICE</th>
-              <th>Désignation</th>
-              <th>Montant HT</th>
-              <th>Taux TVA (%)</th>
-              <th>Montant TVA</th>
-              <th>Montant TTC</th>
-              {showAdvanced && <th>Mode paiement</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className={selected.has(row.id) ? "selected" : ""}>
-                <td className="check-col">
+        {mode === "releve" ? (
+          <table>
+            <thead>
+              <tr>
+                <th className="check-col">
                   <input
                     type="checkbox"
-                    checked={selected.has(row.id)}
-                    onChange={() => toggleSelect(row.id)}
+                    checked={selected.size === rows.length && rows.length > 0}
+                    onChange={toggleSelectAll}
                   />
-                </td>
-                <td>
-                  <input
-                    className="narrow"
-                    value={row.ordre}
-                    onChange={(e) => updateCell(row.id, "ordre", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={row.num}
-                    onChange={(e) => updateCell(row.id, "num", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="date"
-                    value={row.dfac}
-                    onChange={(e) => updateCell(row.id, "dfac", e.target.value)}
-                  />
-                </td>
-                {showAdvanced && (
-                  <td>
+                </th>
+                <th>N° ordre</th>
+                <th>N° facture</th>
+                <th>Date facture</th>
+                {showAdvanced && <th>Date paiement</th>}
+                <th>Fournisseur</th>
+                <th>IF fournisseur</th>
+                <th>ICE</th>
+                <th>Désignation</th>
+                <th>Montant HT</th>
+                <th>Taux TVA (%)</th>
+                <th>Montant TVA</th>
+                <th>Montant TTC</th>
+                {showAdvanced && <th>Mode paiement</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className={selected.has(row.id) ? "selected" : ""}
+                >
+                  <td className="check-col">
                     <input
-                      type="date"
-                      value={row.dpai}
-                      onChange={(e) => updateCell(row.id, "dpai", e.target.value)}
+                      type="checkbox"
+                      checked={selected.has(row.id)}
+                      onChange={() => toggleSelect(row.id)}
                     />
                   </td>
-                )}
-                <td>
-                  <input
-                    value={row.nom}
-                    onChange={(e) => updateCell(row.id, "nom", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={row.ifFournisseur}
-                    onChange={(e) =>
-                      updateCell(row.id, "ifFournisseur", e.target.value)
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    value={row.ice}
-                    onChange={(e) => updateCell(row.id, "ice", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={row.designation}
-                    onChange={(e) =>
-                      updateCell(row.id, "designation", e.target.value)
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    className="num"
-                    inputMode="decimal"
-                    value={row.mht}
-                    onChange={(e) => updateCell(row.id, "mht", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="num"
-                    inputMode="decimal"
-                    value={row.tx}
-                    onChange={(e) => updateCell(row.id, "tx", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="num"
-                    inputMode="decimal"
-                    value={row.tva}
-                    onChange={(e) => updateCell(row.id, "tva", e.target.value)}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="num"
-                    inputMode="decimal"
-                    value={row.ttc}
-                    onChange={(e) => updateCell(row.id, "ttc", e.target.value)}
-                  />
-                </td>
-                {showAdvanced && (
                   <td>
                     <input
                       className="narrow"
-                      value={row.modePaiementId}
+                      value={row.ordre}
                       onChange={(e) =>
-                        updateCell(row.id, "modePaiementId", e.target.value)
+                        updateCell(row.id, "ordre", e.target.value)
                       }
                     />
                   </td>
-                )}
+                  <td>
+                    <input
+                      value={row.num}
+                      onChange={(e) => updateCell(row.id, "num", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="date"
+                      value={row.dfac}
+                      onChange={(e) =>
+                        updateCell(row.id, "dfac", e.target.value)
+                      }
+                    />
+                  </td>
+                  {showAdvanced && (
+                    <td>
+                      <input
+                        type="date"
+                        value={row.dpai}
+                        onChange={(e) =>
+                          updateCell(row.id, "dpai", e.target.value)
+                        }
+                      />
+                    </td>
+                  )}
+                  <td>
+                    <input
+                      value={row.nom}
+                      onChange={(e) => updateCell(row.id, "nom", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.ifFournisseur}
+                      onChange={(e) =>
+                        updateCell(row.id, "ifFournisseur", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.ice}
+                      onChange={(e) => updateCell(row.id, "ice", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.designation}
+                      onChange={(e) =>
+                        updateCell(row.id, "designation", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.mht}
+                      onChange={(e) => updateCell(row.id, "mht", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.tx}
+                      onChange={(e) => updateCell(row.id, "tx", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.tva}
+                      onChange={(e) => updateCell(row.id, "tva", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.ttc}
+                      onChange={(e) => updateCell(row.id, "ttc", e.target.value)}
+                    />
+                  </td>
+                  {showAdvanced && (
+                    <td>
+                      <input
+                        className="narrow"
+                        value={row.modePaiementId}
+                        onChange={(e) =>
+                          updateCell(row.id, "modePaiementId", e.target.value)
+                        }
+                      />
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={showAdvanced ? 8 : 7} />
+                <td className="total-label">TOTAL</td>
+                <td className="total">{totals.mht.toFixed(2)}</td>
+                <td />
+                <td className="total">{totals.tva.toFixed(2)}</td>
+                <td className="total">{totals.ttc.toFixed(2)}</td>
+                {showAdvanced && <td />}
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colSpan={showAdvanced ? 8 : 7} />
-              <td className="total-label">TOTAL</td>
-              <td className="total">{totals.mht.toFixed(2)}</td>
-              <td />
-              <td className="total">{totals.tva.toFixed(2)}</td>
-              <td className="total">{totals.ttc.toFixed(2)}</td>
-              {showAdvanced && <td />}
-            </tr>
-          </tfoot>
-        </table>
+            </tfoot>
+          </table>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th className="check-col">
+                  <input
+                    type="checkbox"
+                    checked={selected.size === nrRows.length && nrRows.length > 0}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <th>Nom et Prénom ou raison sociale</th>
+                <th>Adresse à l&apos;étranger</th>
+                <th>N° d&apos;identification fiscale</th>
+                <th>Nature de l&apos;opération</th>
+                <th>Date de paiement</th>
+                <th>Base imposable (HT)</th>
+                <th>Taux (%)</th>
+                <th>TVA exigible</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nrRows.map((row) => (
+                <tr
+                  key={row.id}
+                  className={selected.has(row.id) ? "selected" : ""}
+                >
+                  <td className="check-col">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(row.id)}
+                      onChange={() => toggleSelect(row.id)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.nom}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "nom", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.adresse}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "adresse", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.identifiantFiscal}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "identifiantFiscal", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={row.natureOperation}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "natureOperation", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="date"
+                      value={row.datePaiement}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "datePaiement", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.baseImposable}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "baseImposable", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.taux}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "taux", e.target.value)
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="num"
+                      inputMode="decimal"
+                      value={row.tvaExigible}
+                      onChange={(e) =>
+                        updateNrCell(row.id, "tvaExigible", e.target.value)
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={5} />
+                <td className="total-label">Total</td>
+                <td className="total">{nrTotals.base.toFixed(2)}</td>
+                <td />
+                <td className="total highlight">{nrTotals.tva.toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        )}
       </section>
 
       <footer className="statusbar">
         <span>
-          {rows.length} ligne{rows.length > 1 ? "s" : ""}
+          {lineCount} ligne{lineCount > 1 ? "s" : ""}
         </span>
         {status && <span className={`toast ${status.type}`}>{status.text}</span>}
         <span className="hint">
-          XML: DeclarationReleveDeduction · Dates AAAA-MM-JJ · Décimal « . »
+          {mode === "releve"
+            ? "XML: DeclarationReleveDeduction · Dates AAAA-MM-JJ · Décimal « . »"
+            : "XML: DeclarationNonResidents · Dates AAAA-MM-JJ · Décimal « . »"}
         </span>
       </footer>
     </div>
