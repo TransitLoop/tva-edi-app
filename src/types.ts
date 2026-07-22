@@ -84,13 +84,45 @@ export const NON_RESIDENT_HEADERS = [
   "TVA exigible",
 ] as const;
 
-export const DEFAULT_HEADER: DeclarationHeader = {
-  idf: "",
-  annee: String(new Date().getFullYear()),
-  periode: "4",
-  regime: "2",
-  modePaiementId: "7",
-};
+export const DEFAULT_HEADER: DeclarationHeader = createDefaultHeader();
+
+/**
+ * Previous closed month (1–12) or quarter (1–4).
+ * Rolls the year back when the previous period is in the prior year.
+ */
+export function defaultPeriodForRegime(
+  regime: string,
+  now: Date = new Date(),
+): { annee: string; periode: string } {
+  const year = now.getFullYear();
+
+  if (regime === "1") {
+    // Previous calendar month: Jan → Dec of previous year
+    if (now.getMonth() === 0) {
+      return { annee: String(year - 1), periode: "12" };
+    }
+    return { annee: String(year), periode: String(now.getMonth()) };
+  }
+
+  const currentQuarter = Math.ceil((now.getMonth() + 1) / 3);
+  if (currentQuarter === 1) {
+    return { annee: String(year - 1), periode: "4" };
+  }
+  return { annee: String(year), periode: String(currentQuarter - 1) };
+}
+
+/** Fresh declaration header for the previous closed period. */
+export function createDefaultHeader(now: Date = new Date()): DeclarationHeader {
+  const regime = "2";
+  const { annee, periode } = defaultPeriodForRegime(regime, now);
+  return {
+    idf: "",
+    annee,
+    periode,
+    regime,
+    modePaiementId: "7",
+  };
+}
 
 export function createEmptyRow(
   ordre: number,

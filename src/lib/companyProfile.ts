@@ -1,6 +1,6 @@
 import {
   DEFAULT_COMPANY_PROFILE,
-  DEFAULT_HEADER,
+  createDefaultHeader,
   type CompanyProfile,
   type DeclarationHeader,
 } from "../types";
@@ -39,7 +39,7 @@ export function clearCompanyProfile() {
 /** Fresh declaration header prefilled from company profile when available. */
 export function headerFromCompanyProfile(
   profile: CompanyProfile,
-  base: DeclarationHeader = DEFAULT_HEADER,
+  base: DeclarationHeader = createDefaultHeader(),
 ): DeclarationHeader {
   return {
     ...base,

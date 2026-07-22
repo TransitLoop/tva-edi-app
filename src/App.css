@@ -251,6 +251,19 @@ button:active:not(:disabled) {
   color: var(--danger);
 }
 
+.top-actions .delete-selected-btn {
+  border: 1px solid #efc4bf;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 650;
+  padding: 0.45rem 0.85rem;
+}
+
+.top-actions .delete-selected-btn:hover {
+  background: #f8d9d5;
+  border-color: #e5a9a2;
+}
+
 .mode-tabs {
   display: inline-flex;
   gap: 0;
@@ -367,8 +380,42 @@ table input::placeholder {
 }
 
 .table-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.95rem 1.4rem 0.85rem;
+}
+
+.table-scroll {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: 0.95rem 1.4rem 1.35rem;
+}
+
+.table-actions {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.85rem;
+  padding-bottom: 0.35rem;
+}
+
+.add-row-btn {
+  border: 1px dashed var(--line-strong);
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--accent);
+  padding: 0.72rem 1.35rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 650;
+  min-width: 230px;
+  touch-action: manipulation;
+}
+
+.add-row-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 table {
@@ -478,28 +525,6 @@ tfoot td {
 
 .total.highlight {
   background: var(--warn);
-}
-
-.table-actions {
-  display: flex;
-  justify-content: center;
-  margin-top: 1rem;
-}
-
-.add-row-btn {
-  border: 1px dashed var(--line-strong);
-  background: rgba(255, 255, 255, 0.75);
-  color: var(--accent);
-  padding: 0.72rem 1.35rem;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: 650;
-  min-width: 230px;
-}
-
-.add-row-btn:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 .actions-col {

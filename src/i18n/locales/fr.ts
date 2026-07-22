@@ -17,6 +17,7 @@ const fr: TranslationDict = {
   "menu.exportCsv": "Exporter CSV",
   "menu.exportExcel": "Exporter Excel",
   "menu.exportXml": "Générer XML EDI",
+  "menu.exportZip": "Exporter ZIP (XML + CSV + Excel)",
   "menu.config": "Configuration",
   "menu.configCompany": "Société (IF, nom, adresse)…",
   "menu.applyIf": "Réappliquer l’IF déclarant",
@@ -27,6 +28,7 @@ const fr: TranslationDict = {
   "action.addRow": "+ Ajouter une ligne",
   "action.delete": "Supprimer",
   "action.deleteRow": "Supprimer la ligne",
+  "action.deleteSelected": "Supprimer ({{count}})",
   "action.cancel": "Annuler",
   "action.clear": "Effacer",
   "action.edit": "Modifier",
@@ -94,6 +96,9 @@ const fr: TranslationDict = {
   "modal.deleteTitle": "Supprimer la ligne ?",
   "modal.deleteBody":
     "Confirmez la suppression de {{label}}. Cette action est irréversible.",
+  "modal.deleteTitleMultiple": "Supprimer les lignes ?",
+  "modal.deleteBodyMultiple":
+    "Confirmez la suppression de {{count}} lignes. Cette action est irréversible.",
   "modal.configTitle": "Configuration société",
   "modal.configLead":
     "Ces informations préremplissent l’IF déclarant. Vous pouvez toujours les modifier sur la déclaration en cours.",
@@ -111,6 +116,7 @@ const fr: TranslationDict = {
 
   "toast.draftRestored": "Brouillon restauré automatiquement.",
   "toast.rowDeleted": "Ligne supprimée.",
+  "toast.rowsDeleted": "{{count}} lignes supprimées.",
   "toast.xmlNrImported": "XML non-résidents importé: {{count}} ligne(s).",
   "toast.xmlReleveImported": "XML relevé importé: {{count}} ligne(s).",
   "toast.csvImported": "CSV importé: {{count}} ligne(s).",
@@ -122,6 +128,8 @@ const fr: TranslationDict = {
   "toast.exportCsvDone": "Export CSV terminé.",
   "toast.exportExcelDone": "Export Excel terminé.",
   "toast.xmlGenerated": "Fichier XML EDI généré.",
+  "toast.exportZipDone": "Export ZIP terminé.",
+  "toast.exportZipFailed": "Export ZIP impossible.",
   "toast.draftSaved": "Brouillon enregistré.",
   "toast.newDeclaration": "Nouvelle déclaration.",
   "toast.companySaved": "Informations société enregistrées.",

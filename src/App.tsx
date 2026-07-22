@@ -19,6 +19,7 @@ import {
   saveCompanyProfile,
 } from "./lib/companyProfile";
 import { saveBinaryFile, saveTextFile } from "./lib/download";
+import { buildZipBlob } from "./lib/zip";
 import { translateValidation } from "./lib/i18nErrors";
 import {
   buildCsv,
@@ -50,9 +51,10 @@ import {
 import { generateXml, parseXml, validateForXml } from "./lib/xml";
 import {
   DEFAULT_COMPANY_PROFILE,
-  DEFAULT_HEADER,
+  createDefaultHeader,
   createEmptyNonResidentRow,
   createEmptyRow,
+  defaultPeriodForRegime,
   type AppMode,
   type CompanyProfile,
   type DeclarationHeader,
@@ -79,7 +81,7 @@ function initialState() {
     return {
       mode: saved.mode ?? ("non_residents" as AppMode),
       header: {
-        ...headerFromCompanyProfile(profile, DEFAULT_HEADER),
+        ...headerFromCompanyProfile(profile, createDefaultHeader()),
         ...saved.header,
       },
       rows:
@@ -97,7 +99,7 @@ function initialState() {
   }
   return {
     mode: "non_residents" as AppMode,
-    header: headerFromCompanyProfile(profile, DEFAULT_HEADER),
+    header: headerFromCompanyProfile(profile, createDefaultHeader()),
     rows: [createEmptyRow(1)],
     nrRows: [createEmptyNonResidentRow(1)],
     showAdvanced: false,
@@ -127,7 +129,7 @@ export default function App() {
   const [draftProfile, setDraftProfile] = useState<CompanyProfile>(boot.profile);
   const [showConfig, setShowConfig] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
-    id: string;
+    ids: string[];
     label: string;
   } | null>(null);
   const [recentFiles, setRecentFiles] = useState<RecentImportedFile[]>(() =>
@@ -287,32 +289,46 @@ export default function App() {
 
   function askDeleteRow(id: string, label: string) {
     setPendingDelete({
-      id,
+      ids: [id],
       label: label.trim() || t("row.thisLine"),
+    });
+  }
+
+  function askDeleteSelected() {
+    if (selected.size < 2) return;
+    setPendingDelete({
+      ids: [...selected],
+      label: t("action.deleteSelected", { count: selected.size }),
     });
   }
 
   function confirmDeleteRow() {
     if (!pendingDelete) return;
-    const { id } = pendingDelete;
+    const { ids } = pendingDelete;
+    const idSet = new Set(ids);
     if (mode === "releve") {
       setRows((prev) => {
-        const next = renumber(prev.filter((r) => r.id !== id));
+        const next = renumber(prev.filter((r) => !idSet.has(r.id)));
         return next.length ? next : [createEmptyRow(1, header.modePaiementId)];
       });
     } else {
       setNrRows((prev) => {
-        const next = renumberNr(prev.filter((r) => r.id !== id));
+        const next = renumberNr(prev.filter((r) => !idSet.has(r.id)));
         return next.length ? next : [createEmptyNonResidentRow(1)];
       });
     }
     setSelected((prev) => {
       const next = new Set(prev);
-      next.delete(id);
+      for (const id of ids) next.delete(id);
       return next;
     });
     setPendingDelete(null);
-    flash("ok", t("toast.rowDeleted"));
+    flash(
+      "ok",
+      ids.length > 1
+        ? t("toast.rowsDeleted", { count: ids.length })
+        : t("toast.rowDeleted"),
+    );
   }
 
   function toggleSelect(id: string) {
@@ -601,6 +617,69 @@ export default function App() {
     setOpenMenu(null);
   }
 
+  async function exportZip() {
+    try {
+      if (mode === "non_residents") {
+        const errors = validateNonResidentXml(header, nrRows);
+        if (errors.length) {
+          flash("err", translateValidation(t, errors[0]));
+          setOpenMenu(null);
+          return;
+        }
+        const base = `DeclarationNonResidents_${header.idf}_${header.annee}_P${header.periode}`;
+        const xml = generateNonResidentXml(header, nrRows);
+        const zip = await buildZipBlob([
+          { name: `${base}.xml`, data: xml },
+          {
+            name: `non_residents_${header.annee}_P${header.periode}.csv`,
+            data: buildNonResidentCsv(nrRows),
+          },
+          {
+            name: `non_residents_${header.annee}_P${header.periode}.xlsx`,
+            data: buildNonResidentExcelBlob(nrRows),
+          },
+        ]);
+        await saveBinaryFile(`${base}.zip`, zip, [
+          { name: "ZIP", extensions: ["zip"] },
+        ]);
+      } else {
+        const errors = validateForXml(header, rows);
+        if (errors.length) {
+          flash("err", translateValidation(t, errors[0]));
+          setOpenMenu(null);
+          return;
+        }
+        const prepared = rows.map((r) => ({
+          ...r,
+          dpai: r.dpai || r.dfac,
+          modePaiementId: r.modePaiementId || header.modePaiementId,
+          designation: r.designation || r.num,
+        }));
+        const base = `DeclarationReleveDeduction_${header.idf}_${header.annee}_P${header.periode}`;
+        const xml = generateXml(header, prepared);
+        const zip = await buildZipBlob([
+          { name: `${base}.xml`, data: xml },
+          {
+            name: `releve_deductions_${header.annee}_P${header.periode}.csv`,
+            data: buildCsv(rows, false),
+          },
+          {
+            name: `releve_deductions_${header.annee}_P${header.periode}.xlsx`,
+            data: buildExcelBlob(rows, false),
+          },
+        ]);
+        await saveBinaryFile(`${base}.zip`, zip, [
+          { name: "ZIP", extensions: ["zip"] },
+        ]);
+      }
+      flash("ok", t("toast.exportZipDone"));
+    } catch (e) {
+      flash("err", e instanceof Error ? e.message : t("toast.exportZipFailed"));
+    } finally {
+      setOpenMenu(null);
+    }
+  }
+
   function saveDraftNow() {
     const savedAt = writeAutosave({
       mode,
@@ -617,7 +696,7 @@ export default function App() {
 
   function resetCurrent() {
     clearAutosave();
-    setHeader(headerFromCompanyProfile(companyProfile, DEFAULT_HEADER));
+    setHeader(headerFromCompanyProfile(companyProfile, createDefaultHeader()));
     setRows([createEmptyRow(1)]);
     setNrRows([createEmptyNonResidentRow(1)]);
     setSelected(new Set());
@@ -690,8 +769,18 @@ export default function App() {
             aria-labelledby="delete-modal-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="delete-modal-title">{t("modal.deleteTitle")}</h2>
-            <p>{t("modal.deleteBody", { label: pendingDelete.label })}</p>
+            <h2 id="delete-modal-title">
+              {pendingDelete.ids.length > 1
+                ? t("modal.deleteTitleMultiple")
+                : t("modal.deleteTitle")}
+            </h2>
+            <p>
+              {pendingDelete.ids.length > 1
+                ? t("modal.deleteBodyMultiple", {
+                    count: pendingDelete.ids.length,
+                  })
+                : t("modal.deleteBody", { label: pendingDelete.label })}
+            </p>
             <div className="modal-actions">
               <button
                 type="button"
@@ -914,6 +1003,9 @@ export default function App() {
                 <button type="button" onClick={exportXml}>
                   {t("menu.exportXml")}
                 </button>
+                <button type="button" onClick={() => void exportZip()}>
+                  {t("menu.exportZip")}
+                </button>
               </div>
             )}
           </div>
@@ -953,6 +1045,16 @@ export default function App() {
         </nav>
 
         <div className="top-actions">
+          {selected.size > 1 && (
+            <button
+              type="button"
+              className="danger delete-selected-btn"
+              onClick={askDeleteSelected}
+              title={t("action.deleteSelected", { count: selected.size })}
+            >
+              {t("action.deleteSelected", { count: selected.size })}
+            </button>
+          )}
           <button
             type="button"
             className="ghost save-btn"
@@ -1059,7 +1161,16 @@ export default function App() {
           {t("field.regime")}
           <select
             value={header.regime}
-            onChange={(e) => updateHeader("regime", e.target.value)}
+            onChange={(e) => {
+              const regime = e.target.value;
+              const { annee, periode } = defaultPeriodForRegime(regime);
+              setHeader((h) => ({
+                ...h,
+                regime,
+                annee,
+                periode,
+              }));
+            }}
           >
             <option value="1">{t("field.regime.monthly")}</option>
             <option value="2">{t("field.regime.quarterly")}</option>
@@ -1087,7 +1198,8 @@ export default function App() {
         )}
       </section>
 
-      <section className="table-wrap">
+      <section className="table-wrap" onClick={(e) => e.stopPropagation()}>
+        <div className="table-scroll">
         {mode === "releve" ? (
           <table>
             <thead>
@@ -1403,9 +1515,21 @@ export default function App() {
             </tfoot>
           </table>
         )}
+        </div>
 
         <div className="table-actions">
-          <button type="button" className="add-row-btn" onClick={addRow}>
+          <button
+            type="button"
+            className="add-row-btn"
+            onMouseDown={(e) => {
+              // Keep the click from being lost when leaving a focused table input.
+              e.preventDefault();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              addRow();
+            }}
+          >
             {t("action.addRow")}
           </button>
         </div>

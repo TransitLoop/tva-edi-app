@@ -38,6 +38,7 @@ Or run the **Release** workflow manually: Actions → Release → Run workflow.
 - Ajout / suppression de lignes
 - Menu **Modèle** : télécharger un template CSV ou Excel
 - Menu **Fichier** : importer CSV, Excel ou XML
+- Menu **Exporter** : CSV, Excel, XML EDI, ou **ZIP** (XML + CSV + Excel)
 - Menu **Configuration** : société (IF, nom, adresse) et **langue** (FR / EN / AR, mémorisée)
 - Interface multilingue (français par défaut, anglais, arabe RTL)
 

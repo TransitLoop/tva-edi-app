@@ -17,6 +17,7 @@ const en: TranslationDict = {
   "menu.exportCsv": "Export CSV",
   "menu.exportExcel": "Export Excel",
   "menu.exportXml": "Generate EDI XML",
+  "menu.exportZip": "Export ZIP (XML + CSV + Excel)",
   "menu.config": "Settings",
   "menu.configCompany": "Company (IF, name, address)…",
   "menu.applyIf": "Reapply declarant IF",
@@ -27,6 +28,7 @@ const en: TranslationDict = {
   "action.addRow": "+ Add a row",
   "action.delete": "Delete",
   "action.deleteRow": "Delete row",
+  "action.deleteSelected": "Delete ({{count}})",
   "action.cancel": "Cancel",
   "action.clear": "Clear",
   "action.edit": "Edit",
@@ -94,6 +96,9 @@ const en: TranslationDict = {
   "modal.deleteTitle": "Delete this row?",
   "modal.deleteBody":
     "Confirm deletion of {{label}}. This action cannot be undone.",
+  "modal.deleteTitleMultiple": "Delete rows?",
+  "modal.deleteBodyMultiple":
+    "Confirm deletion of {{count}} rows. This action cannot be undone.",
   "modal.configTitle": "Company settings",
   "modal.configLead":
     "These details prefill the declarant IF. You can still override them on the current declaration.",
@@ -111,6 +116,7 @@ const en: TranslationDict = {
 
   "toast.draftRestored": "Draft restored automatically.",
   "toast.rowDeleted": "Row deleted.",
+  "toast.rowsDeleted": "{{count}} rows deleted.",
   "toast.xmlNrImported": "Non-residents XML imported: {{count}} row(s).",
   "toast.xmlReleveImported": "Deduction XML imported: {{count}} row(s).",
   "toast.csvImported": "CSV imported: {{count}} row(s).",
@@ -122,6 +128,8 @@ const en: TranslationDict = {
   "toast.exportCsvDone": "CSV export completed.",
   "toast.exportExcelDone": "Excel export completed.",
   "toast.xmlGenerated": "EDI XML file generated.",
+  "toast.exportZipDone": "ZIP export completed.",
+  "toast.exportZipFailed": "ZIP export failed.",
   "toast.draftSaved": "Draft saved.",
   "toast.newDeclaration": "New declaration.",
   "toast.companySaved": "Company details saved.",

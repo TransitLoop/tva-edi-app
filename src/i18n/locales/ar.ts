@@ -17,6 +17,7 @@ const ar: TranslationDict = {
   "menu.exportCsv": "تصدير CSV",
   "menu.exportExcel": "تصدير Excel",
   "menu.exportXml": "إنشاء XML EDI",
+  "menu.exportZip": "تصدير ZIP (XML + CSV + Excel)",
   "menu.config": "الإعدادات",
   "menu.configCompany": "الشركة (الرقم الضريبي، الاسم، العنوان)…",
   "menu.applyIf": "إعادة تطبيق الرقم الضريبي للمصرح",
@@ -27,6 +28,7 @@ const ar: TranslationDict = {
   "action.addRow": "+ إضافة سطر",
   "action.delete": "حذف",
   "action.deleteRow": "حذف السطر",
+  "action.deleteSelected": "حذف ({{count}})",
   "action.cancel": "إلغاء",
   "action.clear": "مسح",
   "action.edit": "تعديل",
@@ -93,6 +95,9 @@ const ar: TranslationDict = {
 
   "modal.deleteTitle": "حذف السطر؟",
   "modal.deleteBody": "أكد حذف {{label}}. لا يمكن التراجع عن هذا الإجراء.",
+  "modal.deleteTitleMultiple": "حذف الأسطر؟",
+  "modal.deleteBodyMultiple":
+    "أكد حذف {{count}} أسطر. لا يمكن التراجع عن هذا الإجراء.",
   "modal.configTitle": "إعدادات الشركة",
   "modal.configLead":
     "تُستخدم هذه المعلومات لملء الرقم الضريبي للمصرح مسبقاً. يمكنك تعديلها في التصريح الحالي.",
@@ -110,6 +115,7 @@ const ar: TranslationDict = {
 
   "toast.draftRestored": "تمت استعادة المسودة تلقائياً.",
   "toast.rowDeleted": "تم حذف السطر.",
+  "toast.rowsDeleted": "تم حذف {{count}} أسطر.",
   "toast.xmlNrImported": "تم استيراد XML لغير المقيمين: {{count}} سطر/أسطر.",
   "toast.xmlReleveImported": "تم استيراد XML للخصوم: {{count}} سطر/أسطر.",
   "toast.csvImported": "تم استيراد CSV: {{count}} سطر/أسطر.",
@@ -121,6 +127,8 @@ const ar: TranslationDict = {
   "toast.exportCsvDone": "اكتمل تصدير CSV.",
   "toast.exportExcelDone": "اكتمل تصدير Excel.",
   "toast.xmlGenerated": "تم إنشاء ملف XML EDI.",
+  "toast.exportZipDone": "اكتمل تصدير ZIP.",
+  "toast.exportZipFailed": "تعذر تصدير ZIP.",
   "toast.draftSaved": "تم حفظ المسودة.",
   "toast.newDeclaration": "تصريح جديد.",
   "toast.companySaved": "تم حفظ معلومات الشركة.",
