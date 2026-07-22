@@ -1,6 +1,9 @@
 # TVA EDI — Relevé des déductions
 
-Application Tauri pour saisir, importer et exporter le **relevé des déductions TVA** (Simpl-TVA / DGI), puis générer le fichier XML `DeclarationReleveDeduction`.
+Application Tauri pour saisir, importer et exporter les annexes TVA Simpl-TVA / DGI :
+
+- **Relevé des déductions** → XML `DeclarationReleveDeduction`
+- **Liste des contribuables non résidents EDI** → XML `DeclarationNonResidents`
 
 ## Download
 
@@ -30,14 +33,24 @@ Or run the **Release** workflow manually: Actions → Release → Run workflow.
 
 ## Fonctionnalités
 
-- Saisie tableau : N° ordre, N° facture, Date facture, Fournisseur, IF, ICE, Désignation, HT, Taux TVA, TVA, TTC
+- Deux modes : relevé des déductions / contribuables non résidents
+- Saisie tableau dédiée à chaque mode
 - Ajout / suppression de lignes
 - Menu **Modèle** : télécharger un template CSV ou Excel
 - Menu **Fichier** : importer CSV, Excel ou XML
 - Menu **Exporter** : CSV, Excel, ou XML EDI
-- En-tête déclaration : IF, année, période, régime, mode de paiement
+- En-tête déclaration : IF, année, période, régime (et mode de paiement pour le relevé)
 
-## Lancer
+## Tests
+
+```bash
+npm test -- --run        # CI-style single run
+npm test                 # watch mode
+npm run test:coverage    # coverage report
+```
+
+GitHub Actions runs typecheck + format validation tests + frontend build on every **pull request** and push to `main` (see `.github/workflows/ci.yml`).
+
 
 Rust/Cargo must be on your `PATH` (required by Tauri):
 
@@ -127,9 +140,10 @@ System deps vary by distro; see [Tauri Linux prerequisites](https://v2.tauri.app
 
 ## Format XML
 
-Le XML généré suit la structure des fichiers exemples du dépôt (`DeclarationReleveDeduction` / `releveDeductions` / `rd`), inverse de `xml_to_table.py`.
+- Relevé : structure des exemples du dépôt (`DeclarationReleveDeduction` / `releveDeductions` / `rd`), inverse de `xml_to_table.py`
+- Non-résidents : `DeclarationNonResidents` / `contribuablesNonResidents` / `cnr` (aligné sur le formulaire Simpl-TVA ; à valider si la DGI publie une annexe XSD dédiée)
 
-> Le PDF `9370_cahierdescharges.pdf` joint au dépôt décrit **Simpl-IS** (impôt sur les sociétés). Le relevé TVA utilise le schéma `DeclarationReleveDeduction` des exemples XML fournis.
+> Le PDF `9370_cahierdescharges.pdf` joint au dépôt parent décrit **Simpl-IS** (impôt sur les sociétés). Les annexes TVA utilisent les schémas ci-dessus.
 
 Règles appliquées (alignées EDI DGI) :
 

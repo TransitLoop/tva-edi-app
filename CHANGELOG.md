@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - GitHub Actions release pipeline building macOS (Apple Silicon + Intel), Windows, and Linux installers and uploading them to GitHub Releases
+- Mode **Liste des contribuables non résidents EDI** with columns: nom/raison sociale, adresse à l'étranger, N° d'identification fiscale, nature de l'opération, date de paiement, base imposable HT, taux, TVA exigible (CSV / Excel / XML)
+- Vitest suite validating EDI XML formats (relevé + non-résidents) and CI workflow on pull requests
 
 ## [0.1.0] — 2026-07-22
 
