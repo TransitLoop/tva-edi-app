@@ -127,20 +127,24 @@ export function validateForXml(
   rows: DeductionRow[],
 ): string[] {
   const errors: string[] = [];
-  if (!header.idf.trim()) errors.push("Identifiant fiscal (IF) requis.");
-  if (!header.annee.trim()) errors.push("Année requise.");
-  if (!header.periode.trim()) errors.push("Période requise.");
-  if (!header.regime.trim()) errors.push("Régime requis.");
-  if (rows.length === 0) errors.push("Ajoutez au moins une ligne de déduction.");
+  if (!header.idf.trim()) errors.push("validation.idfRequired");
+  if (!header.annee.trim()) errors.push("validation.yearRequired");
+  if (!header.periode.trim()) errors.push("validation.periodRequired");
+  if (!header.regime.trim()) errors.push("validation.regimeRequired");
+  if (rows.length === 0) errors.push("validation.rowsRequired");
 
   rows.forEach((row, i) => {
     const n = i + 1;
-    if (!row.num.trim()) errors.push(`Ligne ${n}: N° facture requis.`);
-    if (!normalizeDate(row.dfac)) errors.push(`Ligne ${n}: Date facture requise (AAAA-MM-JJ).`);
-    if (!row.nom.trim()) errors.push(`Ligne ${n}: Fournisseur requis.`);
-    if (!row.ifFournisseur.trim()) errors.push(`Ligne ${n}: IF fournisseur requis.`);
+    if (!row.num.trim()) errors.push(`validation.invoiceRequired|${n}`);
+    if (!normalizeDate(row.dfac)) {
+      errors.push(`validation.invoiceDateRequired|${n}`);
+    }
+    if (!row.nom.trim()) errors.push(`validation.supplierRequired|${n}`);
+    if (!row.ifFournisseur.trim()) {
+      errors.push(`validation.supplierIfRequired|${n}`);
+    }
     if (row.mht === "" || toNumber(row.mht) < 0) {
-      errors.push(`Ligne ${n}: Montant HT invalide.`);
+      errors.push(`validation.htInvalid|${n}`);
     }
   });
 

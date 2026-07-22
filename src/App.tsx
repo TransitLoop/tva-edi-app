@@ -1,6 +1,25 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  LOCALES,
+  createTranslator,
+  localeTag,
+  useI18n,
+  type Locale,
+} from "./i18n";
 import { computeTvaTtc, round2, toNumber } from "./lib/amounts";
+import {
+  clearAutosave,
+  loadAutosave,
+  writeAutosave,
+} from "./lib/autosave";
+import {
+  hasCompanyProfile,
+  headerFromCompanyProfile,
+  loadCompanyProfile,
+  saveCompanyProfile,
+} from "./lib/companyProfile";
 import { saveBinaryFile, saveTextFile } from "./lib/download";
+import { translateValidation } from "./lib/i18nErrors";
 import {
   buildCsv,
   buildExcelBlob,
@@ -19,33 +38,104 @@ import {
   parseNonResidentXml,
   validateNonResidentXml,
 } from "./lib/nonResidents";
+import {
+  arrayBufferToBase64,
+  base64ToArrayBuffer,
+  detectKind,
+  formatRecentLabel,
+  loadRecentImports,
+  pushRecentImport,
+  type RecentImportedFile,
+} from "./lib/recentFiles";
 import { generateXml, parseXml, validateForXml } from "./lib/xml";
 import {
+  DEFAULT_COMPANY_PROFILE,
   DEFAULT_HEADER,
   createEmptyNonResidentRow,
   createEmptyRow,
   type AppMode,
+  type CompanyProfile,
   type DeclarationHeader,
   type DeductionRow,
   type NonResidentRow,
 } from "./types";
 import "./App.css";
 
-type MenuKey = "fichier" | "modele" | "export" | null;
+type MenuKey = "fichier" | "modele" | "export" | "config" | null;
 type Status = { type: "ok" | "err" | "info"; text: string } | null;
 
+function formatClock(locale: Locale, iso: string) {
+  return new Date(iso).toLocaleTimeString(localeTag(locale), {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function initialState() {
+  const profile = loadCompanyProfile();
+  const saved = loadAutosave();
+  if (saved) {
+    return {
+      mode: saved.mode ?? ("non_residents" as AppMode),
+      header: {
+        ...headerFromCompanyProfile(profile, DEFAULT_HEADER),
+        ...saved.header,
+      },
+      rows:
+        saved.rows?.length > 0
+          ? saved.rows
+          : [createEmptyRow(1, saved.header?.modePaiementId ?? "7")],
+      nrRows:
+        saved.nrRows?.length > 0
+          ? saved.nrRows
+          : [createEmptyNonResidentRow(1)],
+      showAdvanced: Boolean(saved.showAdvanced),
+      restoredAt: saved.savedAt,
+      profile,
+    };
+  }
+  return {
+    mode: "non_residents" as AppMode,
+    header: headerFromCompanyProfile(profile, DEFAULT_HEADER),
+    rows: [createEmptyRow(1)],
+    nrRows: [createEmptyNonResidentRow(1)],
+    showAdvanced: false,
+    restoredAt: null as string | null,
+    profile,
+  };
+}
+
 export default function App() {
-  const [mode, setMode] = useState<AppMode>("releve");
-  const [header, setHeader] = useState<DeclarationHeader>(DEFAULT_HEADER);
-  const [rows, setRows] = useState<DeductionRow[]>([createEmptyRow(1)]);
-  const [nrRows, setNrRows] = useState<NonResidentRow[]>([
-    createEmptyNonResidentRow(1),
-  ]);
+  const { t, locale, setLocale } = useI18n();
+  const boot = useMemo(() => initialState(), []);
+  const [mode, setMode] = useState<AppMode>(boot.mode);
+  const [header, setHeader] = useState<DeclarationHeader>(boot.header);
+  const [rows, setRows] = useState<DeductionRow[]>(boot.rows);
+  const [nrRows, setNrRows] = useState<NonResidentRow[]>(boot.nrRows);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openMenu, setOpenMenu] = useState<MenuKey>(null);
   const [status, setStatus] = useState<Status>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(boot.showAdvanced);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(
+    boot.restoredAt,
+  );
+  const [draftRestored, setDraftRestored] = useState(Boolean(boot.restoredAt));
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile>(
+    boot.profile,
+  );
+  const [draftProfile, setDraftProfile] = useState<CompanyProfile>(boot.profile);
+  const [showConfig, setShowConfig] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+  const [recentFiles, setRecentFiles] = useState<RecentImportedFile[]>(() =>
+    loadRecentImports(),
+  );
   const fileRef = useRef<HTMLInputElement>(null);
+  const toastTimer = useRef<number | null>(null);
+  const skipFirstSave = useRef(true);
 
   const activeIds =
     mode === "releve" ? rows.map((r) => r.id) : nrRows.map((r) => r.id);
@@ -71,9 +161,37 @@ export default function App() {
     );
   }, [nrRows]);
 
+  useEffect(() => {
+    if (boot.restoredAt) {
+      flash("info", t("toast.draftRestored"));
+    }
+    // Intentionally run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boot.restoredAt]);
+
+  useEffect(() => {
+    if (skipFirstSave.current) {
+      skipFirstSave.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const savedAt = writeAutosave({
+        mode,
+        header,
+        rows,
+        nrRows,
+        showAdvanced,
+      });
+      setLastSavedAt(savedAt);
+      setDraftRestored(false);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [mode, header, rows, nrRows, showAdvanced]);
+
   function flash(type: "ok" | "err" | "info", text: string) {
     setStatus({ type, text });
-    window.setTimeout(() => setStatus(null), 4500);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setStatus(null), 4500);
   }
 
   function switchMode(next: AppMode) {
@@ -167,23 +285,34 @@ export default function App() {
     }
   }
 
-  function deleteSelected() {
-    if (selected.size === 0) {
-      flash("info", "Sélectionnez une ou plusieurs lignes à supprimer.");
-      return;
-    }
+  function askDeleteRow(id: string, label: string) {
+    setPendingDelete({
+      id,
+      label: label.trim() || t("row.thisLine"),
+    });
+  }
+
+  function confirmDeleteRow() {
+    if (!pendingDelete) return;
+    const { id } = pendingDelete;
     if (mode === "releve") {
       setRows((prev) => {
-        const next = renumber(prev.filter((r) => !selected.has(r.id)));
+        const next = renumber(prev.filter((r) => r.id !== id));
         return next.length ? next : [createEmptyRow(1, header.modePaiementId)];
       });
     } else {
       setNrRows((prev) => {
-        const next = renumberNr(prev.filter((r) => !selected.has(r.id)));
+        const next = renumberNr(prev.filter((r) => r.id !== id));
         return next.length ? next : [createEmptyNonResidentRow(1)];
       });
     }
-    setSelected(new Set());
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setPendingDelete(null);
+    flash("ok", t("toast.rowDeleted"));
   }
 
   function toggleSelect(id: string) {
@@ -201,59 +330,160 @@ export default function App() {
     );
   }
 
+  async function applyImport(options: {
+    fileName: string;
+    kind: "csv" | "xlsx" | "xml";
+    text?: string;
+    buffer?: ArrayBuffer;
+    modeHint: AppMode;
+    remember?: boolean;
+  }) {
+    const { fileName, kind, text, buffer, modeHint, remember = true } = options;
+
+    if (kind === "xml") {
+      const content = text ?? "";
+      const asNonResidents =
+        isNonResidentXml(content) || modeHint === "non_residents";
+      if (asNonResidents) {
+        const parsed = parseNonResidentXml(content);
+        setHeader((h) => ({ ...h, ...parsed.header }));
+        setNrRows(
+          parsed.rows.length ? parsed.rows : [createEmptyNonResidentRow(1)],
+        );
+        setMode("non_residents");
+        flash(
+          "ok",
+          t("toast.xmlNrImported", { count: parsed.rows.length }),
+        );
+      } else {
+        const parsed = parseXml(content);
+        setHeader((h) => ({ ...h, ...parsed.header }));
+        setRows(
+          parsed.rows.length
+            ? parsed.rows
+            : [createEmptyRow(1, header.modePaiementId)],
+        );
+        setMode("releve");
+        flash(
+          "ok",
+          t("toast.xmlReleveImported", { count: parsed.rows.length }),
+        );
+      }
+      if (remember) {
+        setRecentFiles(
+          pushRecentImport({
+            name: fileName,
+            kind: "xml",
+            payload: content,
+            modeHint: asNonResidents ? "non_residents" : "releve",
+          }),
+        );
+      }
+      return;
+    }
+
+    if (kind === "csv") {
+      const content = text ?? "";
+      if (modeHint === "non_residents") {
+        const parsed = parseNonResidentCsv(content);
+        setNrRows(
+          parsed.length ? renumberNr(parsed) : [createEmptyNonResidentRow(1)],
+        );
+        flash("ok", t("toast.csvImported", { count: parsed.length }));
+      } else {
+        const parsed = parseCsv(content);
+        setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
+        flash("ok", t("toast.csvImported", { count: parsed.length }));
+      }
+      if (remember) {
+        setRecentFiles(
+          pushRecentImport({
+            name: fileName,
+            kind: "csv",
+            payload: content,
+            modeHint,
+          }),
+        );
+      }
+      return;
+    }
+
+    const excelBuffer = buffer ?? new ArrayBuffer(0);
+    if (modeHint === "non_residents") {
+      const parsed = parseNonResidentExcel(excelBuffer);
+      setNrRows(
+        parsed.length ? renumberNr(parsed) : [createEmptyNonResidentRow(1)],
+      );
+      flash("ok", t("toast.excelImported", { count: parsed.length }));
+    } else {
+      const parsed = parseExcel(excelBuffer);
+      setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
+      flash("ok", t("toast.excelImported", { count: parsed.length }));
+    }
+    if (remember) {
+      setRecentFiles(
+        pushRecentImport({
+          name: fileName,
+          kind: "xlsx",
+          payload: arrayBufferToBase64(excelBuffer),
+          modeHint,
+        }),
+      );
+    }
+  }
+
   async function onImportFile(file: File) {
     try {
-      const name = file.name.toLowerCase();
-      if (name.endsWith(".xml")) {
-        const text = await file.text();
-        if (isNonResidentXml(text) || mode === "non_residents") {
-          const parsed = parseNonResidentXml(text);
-          setHeader((h) => ({ ...h, ...parsed.header }));
-          setNrRows(
-            parsed.rows.length ? parsed.rows : [createEmptyNonResidentRow(1)],
-          );
-          setMode("non_residents");
-          flash("ok", `XML non-résidents importé: ${parsed.rows.length} ligne(s).`);
-        } else {
-          const parsed = parseXml(text);
-          setHeader((h) => ({ ...h, ...parsed.header }));
-          setRows(
-            parsed.rows.length
-              ? parsed.rows
-              : [createEmptyRow(1, header.modePaiementId)],
-          );
-          setMode("releve");
-          flash("ok", `XML relevé importé: ${parsed.rows.length} ligne(s).`);
-        }
-      } else if (name.endsWith(".csv")) {
-        const text = await file.text();
-        if (mode === "non_residents") {
-          const parsed = parseNonResidentCsv(text);
-          setNrRows(parsed.length ? renumberNr(parsed) : [createEmptyNonResidentRow(1)]);
-          flash("ok", `CSV importé: ${parsed.length} ligne(s).`);
-        } else {
-          const parsed = parseCsv(text);
-          setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
-          flash("ok", `CSV importé: ${parsed.length} ligne(s).`);
-        }
-      } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-        const buf = await file.arrayBuffer();
-        if (mode === "non_residents") {
-          const parsed = parseNonResidentExcel(buf);
-          setNrRows(parsed.length ? renumberNr(parsed) : [createEmptyNonResidentRow(1)]);
-          flash("ok", `Excel importé: ${parsed.length} ligne(s).`);
-        } else {
-          const parsed = parseExcel(buf);
-          setRows(parsed.length ? renumber(parsed) : [createEmptyRow(1)]);
-          flash("ok", `Excel importé: ${parsed.length} ligne(s).`);
-        }
+      const kind = detectKind(file.name);
+      if (!kind) {
+        flash("err", t("toast.badFormat"));
+        return;
+      }
+      if (kind === "xlsx") {
+        const buffer = await file.arrayBuffer();
+        await applyImport({
+          fileName: file.name,
+          kind,
+          buffer,
+          modeHint: mode,
+        });
       } else {
-        flash("err", "Formats acceptés: .xml, .csv, .xlsx");
+        const text = await file.text();
+        await applyImport({
+          fileName: file.name,
+          kind,
+          text,
+          modeHint: mode,
+        });
       }
     } catch (e) {
-      flash("err", e instanceof Error ? e.message : "Import impossible.");
+      flash("err", e instanceof Error ? e.message : t("toast.importFailed"));
     } finally {
       if (fileRef.current) fileRef.current.value = "";
+      setOpenMenu(null);
+    }
+  }
+
+  async function reopenRecent(entry: RecentImportedFile) {
+    try {
+      if (entry.kind === "xlsx") {
+        await applyImport({
+          fileName: entry.name,
+          kind: "xlsx",
+          buffer: base64ToArrayBuffer(entry.payload),
+          modeHint: entry.modeHint,
+        });
+      } else {
+        await applyImport({
+          fileName: entry.name,
+          kind: entry.kind,
+          text: entry.payload,
+          modeHint: entry.modeHint,
+        });
+      }
+    } catch (e) {
+      flash("err", e instanceof Error ? e.message : t("toast.reopenFailed"));
+    } finally {
       setOpenMenu(null);
     }
   }
@@ -290,7 +520,10 @@ export default function App() {
         );
       }
     }
-    flash("ok", `Modèle ${format.toUpperCase()} téléchargé.`);
+    flash(
+      "ok",
+      t("toast.templateDownloaded", { format: format.toUpperCase() }),
+    );
     setOpenMenu(null);
   }
 
@@ -308,7 +541,7 @@ export default function App() {
         [{ name: "CSV", extensions: ["csv"] }],
       );
     }
-    flash("ok", "Export CSV terminé.");
+    flash("ok", t("toast.exportCsvDone"));
     setOpenMenu(null);
   }
 
@@ -326,7 +559,7 @@ export default function App() {
         [{ name: "Excel", extensions: ["xlsx"] }],
       );
     }
-    flash("ok", "Export Excel terminé.");
+    flash("ok", t("toast.exportExcelDone"));
     setOpenMenu(null);
   }
 
@@ -334,7 +567,7 @@ export default function App() {
     if (mode === "non_residents") {
       const errors = validateNonResidentXml(header, nrRows);
       if (errors.length) {
-        flash("err", errors[0]);
+        flash("err", translateValidation(t, errors[0]));
         setOpenMenu(null);
         return;
       }
@@ -347,7 +580,7 @@ export default function App() {
     } else {
       const errors = validateForXml(header, rows);
       if (errors.length) {
-        flash("err", errors[0]);
+        flash("err", translateValidation(t, errors[0]));
         setOpenMenu(null);
         return;
       }
@@ -364,35 +597,227 @@ export default function App() {
         [{ name: "XML", extensions: ["xml"] }],
       );
     }
-    flash("ok", "Fichier XML EDI généré.");
+    flash("ok", t("toast.xmlGenerated"));
+    setOpenMenu(null);
+  }
+
+  function saveDraftNow() {
+    const savedAt = writeAutosave({
+      mode,
+      header,
+      rows,
+      nrRows,
+      showAdvanced,
+    });
+    setLastSavedAt(savedAt);
+    setDraftRestored(false);
+    flash("ok", t("toast.draftSaved"));
     setOpenMenu(null);
   }
 
   function resetCurrent() {
-    setHeader(DEFAULT_HEADER);
-    if (mode === "releve") {
-      setRows([createEmptyRow(1)]);
-    } else {
-      setNrRows([createEmptyNonResidentRow(1)]);
-    }
+    clearAutosave();
+    setHeader(headerFromCompanyProfile(companyProfile, DEFAULT_HEADER));
+    setRows([createEmptyRow(1)]);
+    setNrRows([createEmptyNonResidentRow(1)]);
     setSelected(new Set());
     setOpenMenu(null);
-    flash("info", "Nouvelle déclaration.");
+    setLastSavedAt(null);
+    setDraftRestored(false);
+    flash("info", t("toast.newDeclaration"));
+  }
+
+  function openConfig() {
+    setDraftProfile(companyProfile);
+    setShowConfig(true);
+    setOpenMenu(null);
+  }
+
+  function saveConfig() {
+    const saved = saveCompanyProfile(draftProfile);
+    setCompanyProfile(saved);
+    setShowConfig(false);
+    if (!header.idf.trim() && saved.idf) {
+      setHeader((h) => ({ ...h, idf: saved.idf }));
+    }
+    flash("ok", t("toast.companySaved"));
+  }
+
+  function changeLanguage(next: Locale) {
+    setLocale(next);
+    flash("ok", createTranslator(next)("toast.languageSaved"));
+    setOpenMenu(null);
+  }
+
+  function applyCompanyIf() {
+    if (!companyProfile.idf.trim()) {
+      flash("info", t("toast.configureIfFirst"));
+      return;
+    }
+    setHeader((h) => ({ ...h, idf: companyProfile.idf }));
+    flash("ok", t("toast.ifApplied"));
   }
 
   const lineCount = mode === "releve" ? rows.length : nrRows.length;
+  const saveLabel = draftRestored
+    ? t("status.draftRestored")
+    : lastSavedAt
+      ? t("status.savedAt", { time: formatClock(locale, lastSavedAt) })
+      : t("status.autosaveOn");
+  const linesLabel =
+    lineCount > 1
+      ? t("status.lines_plural", { count: lineCount })
+      : t("status.lines", { count: lineCount });
 
   return (
     <div className="app" onClick={() => setOpenMenu(null)}>
+      {status && (
+        <div className={`toast-stack toast-${status.type}`} role="status">
+          {status.text}
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setPendingDelete(null)}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="delete-modal-title">{t("modal.deleteTitle")}</h2>
+            <p>{t("modal.deleteBody", { label: pendingDelete.label })}</p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => setPendingDelete(null)}
+              >
+                {t("action.cancel")}
+              </button>
+              <button
+                type="button"
+                className="modal-confirm"
+                onClick={confirmDeleteRow}
+              >
+                {t("action.delete")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfig && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setShowConfig(false)}
+        >
+          <div
+            className="modal modal-wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="config-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="config-modal-title">{t("modal.configTitle")}</h2>
+            <p className="modal-lead">{t("modal.configLead")}</p>
+            <div className="config-form">
+              <label>
+                {t("modal.companyIf")}
+                <input
+                  value={draftProfile.idf}
+                  onChange={(e) =>
+                    setDraftProfile((p) => ({ ...p, idf: e.target.value }))
+                  }
+                  placeholder={t("placeholder.idf")}
+                />
+              </label>
+              <label>
+                {t("modal.companyName")}
+                <input
+                  value={draftProfile.raisonSociale}
+                  onChange={(e) =>
+                    setDraftProfile((p) => ({
+                      ...p,
+                      raisonSociale: e.target.value,
+                    }))
+                  }
+                  placeholder={t("placeholder.companyName")}
+                />
+              </label>
+              <label>
+                {t("modal.companyAddress")}
+                <textarea
+                  rows={3}
+                  value={draftProfile.adresse}
+                  onChange={(e) =>
+                    setDraftProfile((p) => ({ ...p, adresse: e.target.value }))
+                  }
+                  placeholder={t("placeholder.companyAddress")}
+                />
+              </label>
+              <fieldset className="language-fieldset">
+                <legend>{t("modal.languageTitle")}</legend>
+                <p className="modal-lead compact">{t("modal.languageLead")}</p>
+                <div className="language-options">
+                  {LOCALES.map((code) => (
+                    <label key={code} className="language-option">
+                      <input
+                        type="radio"
+                        name="app-language"
+                        checked={locale === code}
+                        onChange={() => changeLanguage(code)}
+                      />
+                      <span>{t(`lang.${code}`)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => {
+                  setDraftProfile(DEFAULT_COMPANY_PROFILE);
+                }}
+              >
+                {t("action.clear")}
+              </button>
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => setShowConfig(false)}
+              >
+                {t("action.cancel")}
+              </button>
+              <button
+                type="button"
+                className="modal-save"
+                onClick={saveConfig}
+              >
+                {t("action.save")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="topbar" onClick={(e) => e.stopPropagation()}>
         <div className="brand">
-          <span className="brand-mark">DGI</span>
+          <span className="brand-mark">EDI</span>
           <div>
-            <strong>TVA EDI</strong>
+            <strong>{t("app.brand")}</strong>
             <small>
               {mode === "releve"
-                ? "Relevé des déductions — Simpl-TVA"
-                : "Contribuables non résidents — Simpl-TVA"}
+                ? t("app.subtitle.releve")
+                : t("app.subtitle.nonResidents")}
             </small>
           </div>
         </div>
@@ -406,16 +831,42 @@ export default function App() {
                 setOpenMenu((m) => (m === "fichier" ? null : "fichier"))
               }
             >
-              Fichier
+              {t("menu.file")}
             </button>
             {openMenu === "fichier" && (
-              <div className="dropdown">
+              <div className="dropdown dropdown-wide">
                 <button type="button" onClick={() => fileRef.current?.click()}>
-                  Importer CSV / Excel / XML…
+                  {t("menu.import")}
+                </button>
+                <button type="button" onClick={saveDraftNow}>
+                  {t("menu.saveDraft")}
                 </button>
                 <button type="button" onClick={resetCurrent}>
-                  Nouvelle déclaration
+                  {t("menu.newDeclaration")}
                 </button>
+                {recentFiles.length > 0 && (
+                  <>
+                    <div className="dropdown-sep">{t("menu.recent")}</div>
+                    {recentFiles.map((entry) => {
+                      const label = formatRecentLabel(entry);
+                      const meta = label.includes(" · ")
+                        ? label.split(" · ").slice(1).join(" · ")
+                        : entry.kind.toUpperCase();
+                      return (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          className="recent-file-item"
+                          title={entry.name}
+                          onClick={() => void reopenRecent(entry)}
+                        >
+                          <span className="recent-file-name">{entry.name}</span>
+                          <span className="recent-file-meta">{meta}</span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -428,15 +879,15 @@ export default function App() {
                 setOpenMenu((m) => (m === "modele" ? null : "modele"))
               }
             >
-              Modèle
+              {t("menu.template")}
             </button>
             {openMenu === "modele" && (
               <div className="dropdown">
                 <button type="button" onClick={() => downloadTemplate("csv")}>
-                  Télécharger modèle CSV
+                  {t("menu.templateCsv")}
                 </button>
                 <button type="button" onClick={() => downloadTemplate("xlsx")}>
-                  Télécharger modèle Excel
+                  {t("menu.templateXlsx")}
                 </button>
               </div>
             )}
@@ -450,33 +901,81 @@ export default function App() {
                 setOpenMenu((m) => (m === "export" ? null : "export"))
               }
             >
-              Exporter
+              {t("menu.export")}
             </button>
             {openMenu === "export" && (
               <div className="dropdown">
                 <button type="button" onClick={exportCsv}>
-                  Exporter CSV
+                  {t("menu.exportCsv")}
                 </button>
                 <button type="button" onClick={exportExcel}>
-                  Exporter Excel
+                  {t("menu.exportExcel")}
                 </button>
                 <button type="button" onClick={exportXml}>
-                  Générer XML EDI
+                  {t("menu.exportXml")}
                 </button>
+              </div>
+            )}
+          </div>
+
+          <div className="menu">
+            <button
+              type="button"
+              className={openMenu === "config" || showConfig ? "active" : ""}
+              onClick={() =>
+                setOpenMenu((m) => (m === "config" ? null : "config"))
+              }
+            >
+              {t("menu.config")}
+            </button>
+            {openMenu === "config" && (
+              <div className="dropdown">
+                <button type="button" onClick={openConfig}>
+                  {t("menu.configCompany")}
+                </button>
+                <button type="button" onClick={applyCompanyIf}>
+                  {t("menu.applyIf")}
+                </button>
+                <div className="dropdown-sep">{t("menu.language")}</div>
+                {LOCALES.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    className={locale === code ? "menu-selected" : ""}
+                    onClick={() => changeLanguage(code)}
+                  >
+                    {t(`lang.${code}`)}
+                  </button>
+                ))}
               </div>
             )}
           </div>
         </nav>
 
         <div className="top-actions">
-          <button type="button" className="ghost" onClick={addRow}>
-            + Ajouter
-          </button>
-          <button type="button" className="ghost danger" onClick={deleteSelected}>
-            Supprimer
+          <button
+            type="button"
+            className="ghost save-btn"
+            onClick={saveDraftNow}
+            title={t("action.save")}
+            aria-label={t("action.save")}
+          >
+            <svg
+              className="btn-icon"
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                fill="currentColor"
+                d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"
+              />
+            </svg>
           </button>
           <button type="button" className="primary" onClick={exportXml}>
-            Générer XML
+            {t("action.generateXml")}
           </button>
         </div>
       </header>
@@ -495,70 +994,85 @@ export default function App() {
       <section className="mode-tabs" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
-          className={mode === "releve" ? "active" : ""}
-          onClick={() => switchMode("releve")}
-        >
-          Relevé des déductions
-        </button>
-        <button
-          type="button"
           className={mode === "non_residents" ? "active" : ""}
           onClick={() => switchMode("non_residents")}
         >
-          Liste des contribuables non résidents EDI
+          {t("mode.nonResidents")}
+        </button>
+        <button
+          type="button"
+          className={mode === "releve" ? "active" : ""}
+          onClick={() => switchMode("releve")}
+        >
+          {t("mode.releve")}
         </button>
       </section>
 
       {mode === "non_residents" && (
-        <p className="mode-caption">
-          Opérations réalisées avec des contribuables non résidents à l’exclusion
-          des redevances et droits de licence visés à l’article 91-XI
-        </p>
+        <p className="mode-caption">{t("mode.caption.nonResidents")}</p>
       )}
 
       <section className="header-panel">
+        {hasCompanyProfile(companyProfile) && (
+          <div className="company-chip">
+            <strong>
+              {companyProfile.raisonSociale || t("field.companyConfigured")}
+            </strong>
+            <span>
+              {t("field.configIf")}: {companyProfile.idf || "—"}
+              {companyProfile.adresse ? ` · ${companyProfile.adresse}` : ""}
+            </span>
+            <button type="button" className="chip-link" onClick={openConfig}>
+              {t("action.edit")}
+            </button>
+          </div>
+        )}
         <label>
-          IF déclarant
+          {t("field.idf")}
           <input
             value={header.idf}
             onChange={(e) => updateHeader("idf", e.target.value)}
-            placeholder="ex: 66264953"
+            placeholder={
+              companyProfile.idf
+                ? t("placeholder.idfConfigured", { idf: companyProfile.idf })
+                : t("placeholder.idf")
+            }
           />
         </label>
         <label>
-          Année
+          {t("field.year")}
           <input
             value={header.annee}
             onChange={(e) => updateHeader("annee", e.target.value)}
-            placeholder="2025"
+            placeholder={t("placeholder.year")}
           />
         </label>
         <label>
-          Période
+          {t("field.period")}
           <input
             value={header.periode}
             onChange={(e) => updateHeader("periode", e.target.value)}
-            placeholder="1–4 (trim.) ou 1–12 (mens.)"
+            placeholder={t("placeholder.period")}
           />
         </label>
         <label>
-          Régime
+          {t("field.regime")}
           <select
             value={header.regime}
             onChange={(e) => updateHeader("regime", e.target.value)}
           >
-            <option value="1">1 — Mensuel</option>
-            <option value="2">2 — Trimestriel</option>
+            <option value="1">{t("field.regime.monthly")}</option>
+            <option value="2">{t("field.regime.quarterly")}</option>
           </select>
         </label>
         {mode === "releve" && (
           <>
             <label>
-              Mode paiement (défaut)
+              {t("field.paymentMode")}
               <input
                 value={header.modePaiementId}
                 onChange={(e) => updateHeader("modePaiementId", e.target.value)}
-                placeholder="7"
+                placeholder={t("placeholder.paymentMode")}
               />
             </label>
             <label className="check">
@@ -567,7 +1081,7 @@ export default function App() {
                 checked={showAdvanced}
                 onChange={(e) => setShowAdvanced(e.target.checked)}
               />
-              Afficher date paiement / mode paiement
+              {t("field.showAdvanced")}
             </label>
           </>
         )}
@@ -585,19 +1099,20 @@ export default function App() {
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th>N° ordre</th>
-                <th>N° facture</th>
-                <th>Date facture</th>
-                {showAdvanced && <th>Date paiement</th>}
-                <th>Fournisseur</th>
-                <th>IF fournisseur</th>
-                <th>ICE</th>
-                <th>Désignation</th>
-                <th>Montant HT</th>
-                <th>Taux TVA (%)</th>
-                <th>Montant TVA</th>
-                <th>Montant TTC</th>
-                {showAdvanced && <th>Mode paiement</th>}
+                <th>{t("col.order")}</th>
+                <th>{t("col.invoice")}</th>
+                <th>{t("col.invoiceDate")}</th>
+                {showAdvanced && <th>{t("col.paymentDate")}</th>}
+                <th>{t("col.supplier")}</th>
+                <th>{t("col.supplierIf")}</th>
+                <th>{t("col.ice")}</th>
+                <th>{t("col.designation")}</th>
+                <th>{t("col.ht")}</th>
+                <th>{t("col.vatRate")}</th>
+                <th>{t("col.vat")}</th>
+                <th>{t("col.ttc")}</th>
+                {showAdvanced && <th>{t("col.paymentMode")}</th>}
+                <th className="actions-col">{t("col.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -719,18 +1234,36 @@ export default function App() {
                       />
                     </td>
                   )}
+                  <td className="actions-col">
+                    <button
+                      type="button"
+                      className="row-delete-btn"
+                      title={t("action.deleteRow")}
+                      onClick={() =>
+                        askDeleteRow(
+                          row.id,
+                          row.num ||
+                            row.nom ||
+                            t("row.fallback", { n: row.ordre }),
+                        )
+                      }
+                    >
+                      {t("action.delete")}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
                 <td colSpan={showAdvanced ? 8 : 7} />
-                <td className="total-label">TOTAL</td>
+                <td className="total-label">{t("table.total")}</td>
                 <td className="total">{totals.mht.toFixed(2)}</td>
                 <td />
                 <td className="total">{totals.tva.toFixed(2)}</td>
                 <td className="total">{totals.ttc.toFixed(2)}</td>
                 {showAdvanced && <td />}
+                <td />
               </tr>
             </tfoot>
           </table>
@@ -745,14 +1278,15 @@ export default function App() {
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th>Nom et Prénom ou raison sociale</th>
-                <th>Adresse à l&apos;étranger</th>
-                <th>N° d&apos;identification fiscale</th>
-                <th>Nature de l&apos;opération</th>
-                <th>Date de paiement</th>
-                <th>Base imposable (HT)</th>
-                <th>Taux (%)</th>
-                <th>TVA exigible</th>
+                <th>{t("col.name")}</th>
+                <th>{t("col.foreignAddress")}</th>
+                <th>{t("col.taxId")}</th>
+                <th>{t("col.operationNature")}</th>
+                <th>{t("col.paymentDateFull")}</th>
+                <th>{t("col.taxableBase")}</th>
+                <th>{t("col.rate")}</th>
+                <th>{t("col.vatDue")}</th>
+                <th className="actions-col">{t("col.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -839,31 +1373,51 @@ export default function App() {
                       }
                     />
                   </td>
+                  <td className="actions-col">
+                    <button
+                      type="button"
+                      className="row-delete-btn"
+                      title={t("action.deleteRow")}
+                      onClick={() =>
+                        askDeleteRow(
+                          row.id,
+                          row.nom || t("row.fallback", { n: row.ordre }),
+                        )
+                      }
+                    >
+                      {t("action.delete")}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
                 <td colSpan={5} />
-                <td className="total-label">Total</td>
+                <td className="total-label">{t("table.totalShort")}</td>
                 <td className="total">{nrTotals.base.toFixed(2)}</td>
                 <td />
                 <td className="total highlight">{nrTotals.tva.toFixed(2)}</td>
+                <td />
               </tr>
             </tfoot>
           </table>
         )}
+
+        <div className="table-actions">
+          <button type="button" className="add-row-btn" onClick={addRow}>
+            {t("action.addRow")}
+          </button>
+        </div>
       </section>
 
       <footer className="statusbar">
-        <span>
-          {lineCount} ligne{lineCount > 1 ? "s" : ""}
-        </span>
-        {status && <span className={`toast ${status.type}`}>{status.text}</span>}
+        <span>{linesLabel}</span>
+        <span className="autosave-label">{saveLabel}</span>
         <span className="hint">
           {mode === "releve"
-            ? "XML: DeclarationReleveDeduction · Dates AAAA-MM-JJ · Décimal « . »"
-            : "XML: DeclarationNonResidents · Dates AAAA-MM-JJ · Décimal « . »"}
+            ? t("status.hint.releve")
+            : t("status.hint.nonResidents")}
         </span>
       </footer>
     </div>

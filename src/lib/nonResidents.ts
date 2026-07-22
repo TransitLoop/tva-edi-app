@@ -282,21 +282,21 @@ export function validateNonResidentXml(
   rows: NonResidentRow[],
 ): string[] {
   const errors: string[] = [];
-  if (!header.idf.trim()) errors.push("Identifiant fiscal (IF) requis.");
-  if (!header.annee.trim()) errors.push("Année requise.");
-  if (!header.periode.trim()) errors.push("Période requise.");
-  if (!header.regime.trim()) errors.push("Régime requis.");
-  if (rows.length === 0) errors.push("Ajoutez au moins une ligne.");
+  if (!header.idf.trim()) errors.push("validation.idfRequired");
+  if (!header.annee.trim()) errors.push("validation.yearRequired");
+  if (!header.periode.trim()) errors.push("validation.periodRequired");
+  if (!header.regime.trim()) errors.push("validation.regimeRequired");
+  if (rows.length === 0) errors.push("validation.rowsRequiredNr");
 
   rows.forEach((row, i) => {
     const n = i + 1;
-    if (!row.nom.trim()) errors.push(`Ligne ${n}: Nom / raison sociale requis.`);
-    if (!row.adresse.trim()) errors.push(`Ligne ${n}: Adresse à l'étranger requise.`);
+    if (!row.nom.trim()) errors.push(`validation.nameRequired|${n}`);
+    if (!row.adresse.trim()) errors.push(`validation.addressRequired|${n}`);
     if (!normalizeDate(row.datePaiement)) {
-      errors.push(`Ligne ${n}: Date de paiement requise (AAAA-MM-JJ).`);
+      errors.push(`validation.paymentDateRequired|${n}`);
     }
     if (row.baseImposable === "" || toNumber(row.baseImposable) < 0) {
-      errors.push(`Ligne ${n}: Base imposable invalide.`);
+      errors.push(`validation.baseInvalid|${n}`);
     }
   });
 

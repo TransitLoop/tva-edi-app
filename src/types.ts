@@ -8,6 +8,19 @@ export type DeclarationHeader = {
   modePaiementId: string;
 };
 
+/** Persistent company identity used to prefill declarations. */
+export type CompanyProfile = {
+  idf: string;
+  raisonSociale: string;
+  adresse: string;
+};
+
+export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
+  idf: "",
+  raisonSociale: "",
+  adresse: "",
+};
+
 export type DeductionRow = {
   id: string;
   ordre: number;
